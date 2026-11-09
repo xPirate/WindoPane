@@ -1,0 +1,13 @@
+#!/bin/sh
+# Run WindoPane with its private yt-dlp/Deno on PATH.
+export PATH="/opt/windopane/venv/bin:$PATH"
+export PYTHONPATH="/opt/windopane/app${PYTHONPATH:+:$PYTHONPATH}"
+export WINDOPANE_CONFIG="${WINDOPANE_CONFIG:-/var/lib/windopane/config.json}"
+export PYTHONDONTWRITEBYTECODE=1
+# GPU driver choice from the Graphics panel (VDPAU_DRIVER etc.), PCs only.
+if [ -r /etc/windopane/gpu.env ]; then
+  set -a
+  . /etc/windopane/gpu.env
+  set +a
+fi
+exec /opt/windopane/venv/bin/python3 -m windopane "$@"

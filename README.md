@@ -10,7 +10,8 @@ Up to 16 live tiles per screen on up to four screens, run from a web UI on your 
 ![Raspberry Pi 4 | 5](https://img.shields.io/badge/Raspberry%20Pi-4%20%7C%205-c51a4a?logo=raspberrypi&logoColor=white)
 ![Debian | Ubuntu](https://img.shields.io/badge/PC-Debian%20%7C%20Ubuntu-a81d33?logo=debian&logoColor=white)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)
-![Version 0.6.1](https://img.shields.io/badge/version-0.6.1-ffb020)
+![Version 0.7.0](https://img.shields.io/badge/version-0.7.0-ffb020)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-3a4757)](LICENSE)
 
 <img src="docs/images/wall.jpg" alt="A 2×2 wall: a video tile, a live ADS-B aircraft table, a web dashboard and a second video tile" width="900">
 
@@ -24,12 +25,14 @@ Up to 16 live tiles per screen on up to four screens, run from a web UI on your 
 - [Adding streams](#adding-streams)
 - [Playlists and live channels](#playlists-and-live-channels)
 - [ADS-B tiles](#ads-b-tiles)
+- [Headline alerts](#headline-alerts)
 - [Multiple screens](#multiple-screens)
 - [Audio and controls](#audio-and-controls)
 - [Layouts](#layouts)
 - [Performance](#performance)
 - [Running on a PC](#running-on-a-pc)
 - [OLED ticker (Freenove cases)](#oled-ticker-freenove-cases)
+- [Restart and shut down](#restart-and-shut-down)
 - [Managing it](#managing-it)
 - [Troubleshooting](#troubleshooting)
 - [Security](#security)
@@ -41,10 +44,12 @@ Up to 16 live tiles per screen on up to four screens, run from a web UI on your 
 - 🌐 **Live web pages as tiles:** tar1090/dump1090 maps, radar, Grafana, any dashboard.
 - ✈️ **ADS-B text table:** a plain aircraft list from dump1090, with distance and bearing from your Maidenhead locator or lat/long.
 - 🔴 **Live takeover:** a channel can take over a tile when it goes live, ranked by priority, and give the tile back when the broadcast ends.
+- 🚨 **Headline alerts:** new titles from any RSS or Atom feed pop up on the wall or scroll along a news ticker.
 - 🎞️ **Playlists:** YouTube playlists play in order or shuffled, and removed or private videos are skipped.
 - 🔇 **Muted by default:** one tile is audible at a time, picked from a keyboard, a USB/Bluetooth controller or the web UI.
 - 🧩 **16 layouts:** from single to 4 × 4, chosen per screen.
 - 🖥️ **Up to four screens:** two on a Pi, four on a PC, at up to 4K.
+- 🔌 **Restart, reboot and shut down** from the web UI, no SSH needed.
 - ⚙️ **PC support:** mpv with GPU decoding, and AMD/Intel/NVIDIA driver switching from the web UI.
 - 📟 **Optional OLED ticker** for Freenove Pi 5 cases.
 
@@ -53,7 +58,7 @@ Up to 16 live tiles per screen on up to four screens, run from a web UI on your 
 Start from a fresh **Raspberry Pi OS Lite (64-bit), Bookworm or newer**, with SSH and network set up in Raspberry Pi Imager. For a PC, see [Running on a PC](#running-on-a-pc).
 
 ```bash
-git clone https://github.com/<your-user>/windopane.git
+git clone https://github.com/xPirate/WindoPane.git windopane
 cd windopane
 sudo ./install.sh --password 'pick-one'
 sudo reboot
@@ -62,10 +67,12 @@ sudo reboot
 <details>
 <summary>Installing from a release tarball instead</summary>
 
+Download the tarball from the [Releases page](https://github.com/xPirate/WindoPane/releases), then:
+
 ```bash
-scp windopane-0.6.1.tar.gz pi@<pi-address>:
+scp windopane-0.7.0.tar.gz pi@<pi-address>:
 ssh pi@<pi-address>
-tar xzf windopane-0.6.1.tar.gz && cd windopane
+tar xzf windopane-0.7.0.tar.gz && cd windopane
 sudo ./install.sh --password 'pick-one'
 sudo reboot
 ```
@@ -87,9 +94,15 @@ Re-running `install.sh` upgrades in place and keeps your streams.
 
 ## The web UI
 
-<img src="docs/images/web-ui.png" alt="windoPane web UI: a 2×2 screen preview with per-tile controls and the layout picker" width="720">
+The web UI has two pages, switched from the header.
 
-Every tile in the preview has its stream picker, a live status pill, and listen, fill-screen and reload buttons. Changes reach the wall immediately. Below the preview are the layout picker, the stream list, the controls reference and the settings.
+**Wall** is for running the screens: any alerts that are up, the screen tabs, a live preview of each screen, the layout picker and your stream list. Every tile in the preview has its stream picker, a status pill, and listen, fill-screen and reload buttons. Changes reach the wall immediately.
+
+<img src="docs/images/web-ui.png" alt="The Wall page: an alert that's on screen, a 2×2 screen preview with per-tile controls, and the layout picker" width="720">
+
+**Settings** (`/settings`) holds everything that configures the system: alert feeds, display and playback options, restart and shut down, system information, the graphics drivers on a PC, and the keyboard and controller reference.
+
+<img src="docs/images/settings.png" alt="The Settings page: alert feeds and options, recent alerts, display and playback settings, and the System panel with restart, reboot and shut down" width="720">
 
 ### How it fits together
 
@@ -98,10 +111,12 @@ flowchart LR
     UI["Web UI / JSON API<br/>:8090"] --> C["Controller<br/>config.json"]
     K["Keyboards, gamepads<br/>(evdev)"] --> C
     LW["Live watcher<br/>(yt-dlp)"] --> C
+    RSS["Alert feeds<br/>(RSS / Atom)"] --> C
     C --> W["Wall<br/>one GTK window per screen"]
     W --> V["Video tiles<br/>libVLC on Pi · mpv on PC"]
     W --> P["Web tiles<br/>WebKitGTK"]
     W --> A["ADS-B tiles<br/>dump1090 table"]
+    W --> O["Alert pop-ups<br/>and ticker"]
 ```
 
 The wall runs on a bare X server with no desktop, started by autologin on tty1, and restarts itself if anything crashes.
@@ -166,6 +181,38 @@ A plain-text aircraft table with no map. Columns: flight, hex, squawk, altitude 
 
 The table refreshes every second. Tiles that use the same BaseStation feed share one connection, which closes after five minutes if nothing is showing it.
 
+## Headline alerts
+
+<img src="docs/images/alerts.jpg" alt="Two weather pop-ups stacked in the top-right corner and a scrolling news ticker along the bottom of a 2×2 wall" width="900">
+
+Point windoPane at any RSS or Atom feed (government advisories, press releases, weather alerts, a news wire) and every new headline shows up on the wall. Only the titles are read; there is no reader built in.
+
+Add feeds under **Settings → Alerts**. For each feed you choose:
+
+| | |
+|---|---|
+| **Show as** | *Pop-up*: a card in a corner of the screen, like a live-stream alert. *Ticker*: a news strip that scrolls along the bottom. Or both. |
+| **On screen for** | 10 seconds to 1 hour, or *until dismissed*. Pop-ups show a bar counting down. |
+| **Check every** | How often the feed is read, 5 minutes by default. Feeds that support it are only downloaded when they've changed. |
+| **Screens** | All screens, or just one. |
+| **Only titles containing** | Optional words, separated by commas. Only headlines containing at least one of them alert (`missile, launch, ukraine`). |
+
+**Test** reads the feed and lists its newest headlines, and fills in the name from the feed. Each feed in the list shows when it was last checked and any error, with buttons to **Check now** and to **Show latest**, which puts the newest headline on the wall to try out the look.
+
+How new headlines are found:
+
+- **No flood when you add a feed:** the headlines already in it are remembered without alerting. Only headlines posted after that alert.
+- **Restarts don't repeat alerts:** remembered headlines are kept in `/var/lib/windopane/alerts-seen.json`. A headline posted while the wall was off alerts when it next checks.
+- **Bursts and old news:** at most 5 new headlines are shown from one check (the newest), and headlines dated more than two days ago never alert.
+- **Stacking:** the newest pop-up goes on top, up to 3 at once (*Pop-ups at once*, up to 6). The rest wait until a space frees up. Every active ticker headline scrolls in one strip, newest first.
+
+Pop-up position (any corner), ticker position (bottom or top), ticker speed and an on/off switch for all alerts are under the feed list. **Recent alerts** lists the last 20 with links to the full stories. Recent alerts are kept in memory, so the list starts empty after a restart.
+
+Alerts that are up also appear at the top of the Wall page, with **Dismiss** buttons. On a keyboard, <kbd>D</kbd> or <kbd>Esc</kbd> dismisses them all. The OLED ticker shows them too.
+
+> [!TIP]
+> Most government and news sites list their feeds on an "RSS" page. The U.S. Department of War's news releases, for example, are at `https://www.war.gov/news/rss_releases2.xml`. Some sites block automated requests; if **Test** reports HTTP 403, that site won't work from here.
+
 ## Multiple screens
 
 Each connected monitor becomes a screen with its own layout and up to 16 tiles: two screens on a Pi (its two HDMI ports), up to four on a PC. You can set up a screen from its tab in the web UI before anything is plugged in. It starts as soon as a monitor appears, and stops its streams when the monitor is unplugged. Screens 3 and 4 only appear in the web UI once a monitor is connected or they have been set up.
@@ -197,6 +244,7 @@ Tiles are numbered 1–16 on each screen. You pick a screen, then a tile on it. 
 | Zoom the audible tile to full screen | <kbd>Z</kbd> <kbd>Enter</kbd> | Guide, left stick click |
 | Reload the audible tile | <kbd>R</kbd> | |
 | Next / previous video on a playlist tile | <kbd>N</kbd> / <kbd>B</kbd>, media keys | |
+| Dismiss alerts | <kbd>D</kbd> <kbd>Esc</kbd> | |
 
 Number entry works like a TV remote: on screens with 10 or more tiles, <kbd>1</kbd> waits about a second for a second digit (<kbd>1</kbd> <kbd>2</kbd> is tile 12; <kbd>1</kbd> on its own is tile 1). Every other digit acts immediately. Devices are read directly, so no window focus is needed, and hot-plugging works. On a Pi 4 the TV remote may also work over HDMI-CEC, if your TV passes its buttons through.
 
@@ -277,8 +325,8 @@ Settings → **Video player** picks the engine: *Auto* (VLC on a Pi, mpv on a PC
 
 A small status display for the 0.96" OLED in Freenove's Raspberry Pi 5 cases (FNK0100, FNK0107), or any SSD1306 128×64 OLED on I2C.
 
-- **Top line:** which tile you're hearing (`S2·T3` with several screens, `LIVE` during a takeover) and the clock.
-- **Middle:** a scrolling ticker with the stream name and title. ADS-B tiles scroll the aircraft count, any emergency squawks, and the nearest aircraft with distance and bearing.
+- **Top line:** which tile you're hearing (`S2·T3` with several screens, `LIVE` during a takeover, `ALERT` while headline alerts are up) and the clock.
+- **Middle:** a scrolling ticker with the stream name and title, led by any headline alerts that are on the wall. ADS-B tiles scroll the aircraft count, any emergency squawks, and the nearest aircraft with distance and bearing.
 - **Bottom line:** state, volume and CPU temperature.
 
 The featured tile is the one you're listening to. When everything is muted it's tile 1 of the focused screen, marked `MUTED`.
@@ -298,6 +346,21 @@ sudo ./extras/oled/install-oled.sh --uninstall
 - **Freenove's case software:** if it's installed, only its OLED screen is switched off, so the two don't fight over the display; fan and LED control keep running. `--uninstall` gives the OLED back. If you later turn the OLED on in Freenove's app, they will clash again.
 - **Burn-in:** OLEDs burn in. The default contrast is reduced, the static lines move a pixel every few minutes, and `--sleep` turns the display off for set hours.
 
+## Restart and shut down
+
+**Settings → System** has three buttons, each pressed twice to confirm:
+
+| | |
+|---|---|
+| **Restart the wall** | Reloads windoPane in a few seconds. Every stream restarts; the system keeps running. |
+| **Reboot** | Restarts the whole system. The wall and web UI are back in about a minute. |
+| **Shut down** | Turns the system off. To start it again, press the power button (Pi 5, PC) or unplug and replug the power (Pi 4). |
+
+Reboot and shut down go through a small helper, `/opt/windopane/bin/windopane-power`. The installer's sudo rule lets the wall's user run it with exactly `reboot` or `poweroff`, and nothing else. Re-run `install.sh` after upgrading from an earlier version to add that rule.
+
+> [!WARNING]
+> Without a web UI password, anyone on your network can use these buttons. The System panel reminds you until a password is set.
+
 ## Managing it
 
 ```bash
@@ -310,7 +373,7 @@ sudo windopane-ctl update-ytdlp
 ```
 
 - **yt-dlp updates:** yt-dlp, plus Deno (which YouTube now requires), updates daily at about 4:20 am. The wall restarts itself if the version changed.
-- **Files:** config is in `/var/lib/windopane/config.json`, logs in `/var/lib/windopane/logs/`.
+- **Files:** config is in `/var/lib/windopane/config.json`, logs in `/var/lib/windopane/logs/`, and reboots and shutdowns requested from the web UI are logged in `/var/log/windopane/power.log`.
 - **Advanced:** `player.extra_vlc_args` in the config passes options straight to libVLC.
 - **Uninstall:** `sudo ./uninstall.sh` (add `--purge` to delete your streams too). Installed GPU drivers are left in place.
 
@@ -352,6 +415,20 @@ Run `sudo windopane-ctl update-ytdlp`. The Settings panel shows the yt-dlp versi
 </details>
 
 <details>
+<summary><b>An alert feed shows an error</b></summary>
+
+The feed's status line in Settings → Alerts shows the last error. "HTTP 403" means the site refuses automated requests; "a web page, not an RSS or Atom feed" means the address is the site's RSS listing page rather than the feed itself, so open that page and copy one of the feed links from it.
+
+</details>
+
+<details>
+<summary><b>Reboot or Shut down says "re-run install.sh"</b></summary>
+
+The sudo rule for the power helper is added by the installer from version 0.7.0. Run `sudo ./install.sh` again from the new version; your config is kept.
+
+</details>
+
+<details>
 <summary><b>Choppy video</b></summary>
 
 Lower the quality cap, use fewer video tiles, or raise Settings → Network buffer.
@@ -361,7 +438,7 @@ Lower the quality cap, use fewer video tiles, or raise Settings → Network buff
 ## Security
 
 > [!CAUTION]
-> The web UI controls what's on screen and accepts any URL. Set a password, keep it on your LAN, and don't port-forward it.
+> The web UI controls what's on screen, accepts any URL, and can reboot or shut the system down. Set a password, keep it on your LAN, and don't port-forward it.
 
 Web tiles have popups, permission prompts and context menus disabled.
 
@@ -384,7 +461,7 @@ Needs `python3-gi`, `gir1.2-gtk-3.0`, `gir1.2-webkit2-4.1`, `python3-vlc`, `pyth
 ```
 app/windopane/      the wall, web UI and API (Python, GTK, Flask)
   static/           web UI (plain HTML/CSS/JS, no build step)
-system/             launcher, session scripts, windopane-ctl, GPU helper
+system/             launcher, session scripts, windopane-ctl, GPU and power helpers
 extras/oled/        OLED ticker for Freenove cases
 tests/              unit tests and a fake yt-dlp for offline testing
 docs/images/        README images
@@ -393,3 +470,7 @@ uninstall.sh
 ```
 
 </details>
+
+## License
+
+windoPane is released under the [Apache License 2.0](LICENSE).

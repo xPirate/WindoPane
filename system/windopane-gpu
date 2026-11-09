@@ -1,0 +1,246 @@
+#!/bin/bash
+# windopane-gpu: install the video drivers for one GPU vendor and remove the
+# others. Runs as root (the web UI calls it through a narrow sudo rule).
+#
+#   windopane-gpu apply  <amd|intel|nvidia|none>   start a change in the background
+#   windopane-gpu run    <amd|intel|nvidia|none>   do the change now (installer)
+#   windopane-gpu reboot
+#
+# Only these fixed package sets are ever touched. The shared Mesa/OpenGL
+# libraries the desktop itself needs are never removed, and firmware packages
+# are kept (other hardware may use them).
+set -uo pipefail
+
+HELPER=/opt/windopane/bin/windopane-gpu
+LOGDIR=/var/log/windopane
+LOG=$LOGDIR/gpu.log
+STATE=$LOGDIR/gpu.state
+ENVDIR=/etc/windopane
+ENVFILE=$ENVDIR/gpu.env
+XORGCONF=/etc/X11/xorg.conf.d/20-windopane-amdgpu.conf
+LOCK=/run/windopane-gpu.lock
+VENDORS="amd intel nvidia none"
+
+AMD_PKGS=(mesa-va-drivers mesa-vdpau-drivers xserver-xorg-video-amdgpu)
+AMD_FW_DEBIAN=(firmware-amd-graphics)
+INTEL_PKGS=(intel-media-va-driver i965-va-driver libvdpau-va-gl1)
+INTEL_FW_DEBIAN=(firmware-misc-nonfree)
+TOOLS=(vainfo vdpauinfo pciutils)
+
+die() { echo "windopane-gpu: $*" >&2; exit 2; }
+
+[ "$(id -u)" -eq 0 ] || die "must run as root"
+umask 022
+export DEBIAN_FRONTEND=noninteractive
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+valid_vendor() { case " $VENDORS " in *" $1 "*) return 0 ;; esac; return 1; }
+
+is_pi() { { tr -d '\0' </proc/device-tree/model; } 2>/dev/null | grep -qi "raspberry pi"; }
+
+distro() {
+  # prints "ubuntu" or "debian"
+  . /etc/os-release
+  case " ${ID:-} ${ID_LIKE:-} " in *" ubuntu "*) echo ubuntu ;; *) echo debian ;; esac
+}
+
+set_state() {
+  # key=value lines, rewritten atomically
+  local tmp
+  tmp="$(mktemp "$LOGDIR/.state.XXXXXX")"
+  printf '%s\n' "$@" >"$tmp"
+  chmod 644 "$tmp"
+  mv -f "$tmp" "$STATE"
+}
+
+installed() { dpkg-query -W -f='${db:Status-Abbrev}' "$1" 2>/dev/null | grep -q '^ii'; }
+available() { apt-cache show "$1" >/dev/null 2>&1; }
+
+only_available() {
+  local p
+  for p in "$@"; do
+    if available "$p"; then echo "$p"; else echo "  (skipping $p: not in your apt sources)" >&2; fi
+  done
+}
+
+only_installed() {
+  local p
+  for p in "$@"; do installed "$p" && echo "$p"; done
+}
+
+nvidia_installed() {
+  dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 2>/dev/null |
+    awk '$1 ~ /^i/ && $2 ~ /^(nvidia-|libnvidia-|xserver-xorg-video-nvidia|firmware-nvidia-gsp)/ {print $2}'
+}
+
+apt_install() {
+  [ $# -gt 0 ] || return 0
+  echo "+ apt-get install $*"
+  apt-get install -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold "$@"
+}
+
+apt_remove() {
+  [ $# -gt 0 ] || return 0
+  echo "+ apt-get purge $*"
+  apt-get purge -y "$@"
+}
+
+write_env() {
+  local vendor=$1
+  install -d -m 755 "$ENVDIR"
+  {
+    echo "# Written by windopane-gpu. Read by /opt/windopane/bin/windopane."
+    echo "WINDOPANE_GPU=$vendor"
+    case "$vendor" in
+      amd)    echo "VDPAU_DRIVER=radeonsi"; echo "LIBVA_DRIVER_NAME=radeonsi" ;;
+      intel)  echo "VDPAU_DRIVER=va_gl";    echo "LIBVA_DRIVER_NAME=iHD" ;;
+      nvidia) echo "VDPAU_DRIVER=nvidia" ;;
+    esac
+  } >"$ENVFILE.tmp"
+  chmod 644 "$ENVFILE.tmp"
+  mv -f "$ENVFILE.tmp" "$ENVFILE"
+}
+
+do_run() {
+  local vendor=$1 d rc=0
+  d="$(distro)"
+  echo "=== $(date '+%F %T') switching video drivers to: $vendor ($d) ==="
+
+  echo "--- updating package lists"
+  apt-get update -qq || { echo "apt-get update failed"; return 1; }
+
+  # 1. install this vendor's packages first, so a failure leaves the old drivers in place
+  local want=()
+  case "$vendor" in
+    amd)
+      want=("${AMD_PKGS[@]}" "${TOOLS[@]}")
+      [ "$d" = debian ] && want+=("${AMD_FW_DEBIAN[@]}")
+      ;;
+    intel)
+      want=("${INTEL_PKGS[@]}" "${TOOLS[@]}")
+      [ "$d" = debian ] && want+=("${INTEL_FW_DEBIAN[@]}")
+      ;;
+    nvidia)
+      if [ "$d" = ubuntu ]; then
+        echo "--- installing the recommended NVIDIA driver (ubuntu-drivers)"
+        apt_install ubuntu-drivers-common "${TOOLS[@]}" || rc=1
+        echo "+ ubuntu-drivers install"
+        ubuntu-drivers install || rc=1
+      else
+        want=(nvidia-driver firmware-misc-nonfree "linux-headers-$(dpkg --print-architecture)" "${TOOLS[@]}")
+        if ! available nvidia-driver; then
+          echo "!! nvidia-driver is not available. On Debian, enable the 'contrib non-free"
+          echo "!! non-free-firmware' components in your apt sources, then try again."
+          rc=1
+        fi
+      fi
+      ;;
+    none) want=("${TOOLS[@]}") ;;
+  esac
+  if [ ${#want[@]} -gt 0 ]; then
+    echo "--- installing"
+    mapfile -t want < <(only_available "${want[@]}")
+    apt_install "${want[@]}" || rc=1
+  fi
+
+  # 2. only after a clean install: remove the other vendors' packages
+  if [ $rc -ne 0 ]; then
+    echo "!! install failed; keeping the drivers that were already installed"
+    echo "=== nothing was removed. Fix the error above and try again. ==="
+    return 1
+  fi
+  local remove=()
+  if [ "$vendor" != amd ]; then
+    mapfile -t -O "${#remove[@]}" remove < <(only_installed "${AMD_PKGS[@]}")
+  fi
+  if [ "$vendor" != intel ]; then
+    mapfile -t -O "${#remove[@]}" remove < <(only_installed "${INTEL_PKGS[@]}" intel-media-va-driver-non-free)
+  fi
+  if [ "$vendor" != nvidia ]; then
+    mapfile -t -O "${#remove[@]}" remove < <(nvidia_installed)
+  fi
+  if [ ${#remove[@]} -gt 0 ]; then
+    echo "--- removing drivers for other GPUs"
+    apt_remove "${remove[@]}" || rc=1
+  else
+    echo "--- nothing to remove"
+  fi
+  [ "$vendor" != amd ] && rm -f "$XORGCONF"
+
+  # 3. vendor-specific display settings
+  if [ "$vendor" = amd ] && installed xserver-xorg-video-amdgpu; then
+    install -d -m 755 /etc/X11/xorg.conf.d
+    cat >"$XORGCONF" <<'EOF'
+# Written by windopane-gpu: tear-free video on AMD GPUs.
+Section "OutputClass"
+    Identifier "windopane-amdgpu"
+    MatchDriver "amdgpu"
+    Driver "amdgpu"
+    Option "TearFree" "true"
+EndSection
+EOF
+  fi
+
+  echo "--- cleaning up packages nothing needs any more"
+  apt-get autoremove -y --purge || rc=1
+
+  write_env "$vendor"
+  if [ "$vendor" = nvidia ] && command -v mokutil >/dev/null && mokutil --sb-state 2>/dev/null | grep -qi enabled; then
+    echo "!! Secure Boot is on: the NVIDIA kernel module may need to be enrolled (MOK) at the"
+    echo "!! next boot from a keyboard on the console, or Secure Boot turned off in the firmware."
+  fi
+  if [ $rc -eq 0 ]; then
+    echo "=== done. Reboot to finish switching drivers. ==="
+  else
+    echo "=== finished with errors (see above). ==="
+  fi
+  return $rc
+}
+
+cmd=${1:-}
+vendor=${2:-}
+
+install -d -m 755 "$LOGDIR"
+
+case "$cmd" in
+  apply|run)
+    valid_vendor "$vendor" || die "vendor must be one of: $VENDORS"
+    is_pi && die "Raspberry Pi graphics are built in; there is nothing to switch"
+    ;;
+  reboot) ;;
+  *) die "usage: windopane-gpu apply|run <$VENDORS> | reboot" ;;
+esac
+
+case "$cmd" in
+  reboot)
+    echo "$(date '+%F %T') reboot requested from the web UI" >>"$LOG"
+    systemctl reboot
+    ;;
+  apply)
+    # refuse to start a second change while one is running
+    exec 9>"$LOCK"
+    flock -n 9 || die "a driver change is already running"
+    flock -u 9
+    : >"$LOG"
+    set_state "status=starting" "vendor=$vendor" "started=$(date +%s)"
+    if command -v systemd-run >/dev/null && [ -d /run/systemd/system ]; then
+      # its own unit, so it keeps going even if the wall restarts meanwhile
+      systemd-run --unit="windopane-gpu-$(date +%s)" --collect --quiet \
+        "$HELPER" run "$vendor" || die "could not start the change"
+    else
+      setsid "$HELPER" run "$vendor" </dev/null >/dev/null 2>&1 &
+    fi
+    echo "started"
+    ;;
+  run)
+    exec 9>"$LOCK"
+    flock -n 9 || die "a driver change is already running"
+    started=$(date +%s)
+    set_state "status=running" "vendor=$vendor" "started=$started"
+    do_run "$vendor" 2>&1 | tee -a "$LOG"
+    rc=${PIPESTATUS[0]}
+    if [ "$rc" -eq 0 ]; then st="done"; else st="failed"; fi
+    set_state "status=$st" "vendor=$vendor" "started=$started" "finished=$(date +%s)" "reboot=1"
+    exit "$rc"
+    ;;
+esac

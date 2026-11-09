@@ -1,0 +1,17 @@
+#!/bin/bash
+# X client script: keep the screen awake and keep the wall running.
+xset s off
+xset s noblank
+xset -dpms
+
+export GDK_BACKEND=x11
+export NO_AT_BRIDGE=1
+# Let user services (PipeWire) see this X session.
+systemctl --user import-environment DISPLAY XAUTHORITY 2>/dev/null || true
+
+cd / || exit 1
+while true; do
+  /opt/windopane/bin/windopane
+  echo "$(date '+%F %T') windopane exited with status $?; restarting in 3s"
+  sleep 3
+done

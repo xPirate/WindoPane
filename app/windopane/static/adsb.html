@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADS-B</title>
+<style>
+  :root { --bg:#05080b; --line:#16202a; --text:#cfe3d8; --dim:#5f7a6d; --hi:#7cf0b0; --amber:#ffb020; --bad:#ff5d5d; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); overflow:hidden;
+    font-family: "DejaVu Sans Mono", ui-monospace, Menlo, Consolas, monospace; }
+  body { display:flex; flex-direction:column; container-type:size; }
+  header { display:flex; gap:1.6em; align-items:baseline; padding:.55em .9em; border-bottom:1px solid var(--line);
+    font-size:clamp(11px, 2.1cqw, 22px); white-space:nowrap; overflow:hidden; }
+  header b { color:var(--hi); font-weight:700; letter-spacing:.04em; }
+  header span { color:var(--dim); }
+  header em { font-style:normal; color:var(--text); }
+  .err { color:var(--bad); }
+  main { flex:1; overflow:hidden; }
+  table { width:100%; border-collapse:collapse; font-size:clamp(10px, 1.9cqw, 21px); }
+  th { text-align:right; color:var(--dim); font-weight:400; padding:.35em .55em; border-bottom:1px solid var(--line); }
+  td { text-align:right; padding:.22em .55em; white-space:nowrap; border-bottom:1px solid #0c1218; }
+  th.l, td.l { text-align:left; }
+  td.call { color:var(--hi); font-weight:700; }
+  td.dim, span.dim { color:var(--dim); }
+  tr.alert td { background:#2a0b0b; color:#ffd0d0; }
+  tr.alert td.call, td.sq7 { color:var(--bad); font-weight:700; }
+  tr.stale td { opacity:.5; }
+  td.arrow { width:1.2em; padding-right:0; color:var(--amber); }
+  .up { color:#7fd1ff; } .down { color:#ffa36b; }
+  footer { padding:.35em .9em; font-size:clamp(9px, 1.5cqw, 16px); color:var(--dim); border-top:1px solid var(--line);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* narrow tiles: drop the less important columns */
+  @container (max-width: 760px) { .c-rssi, .c-seen, .c-hex { display:none; } }
+  @container (max-width: 520px) { .c-vr, .c-trk { display:none; } }
+</style>
+</head>
+<body>
+<header><b id="title">ADS-B</b><span>aircraft <em id="n">–</em></span><span>positions <em id="np">–</em></span><span>msg/s <em id="rate">–</em></span><span id="far"></span></header>
+<main><table><thead><tr>
+  <th class="l">Flight</th><th class="l c-hex">Hex</th><th>Sqk</th><th>Alt ft</th><th class="c-vr">V/S</th>
+  <th>Spd kt</th><th class="c-trk" colspan="2">Hdg</th><th id="dist-h">Dist</th><th colspan="2">Brg</th>
+  <th class="c-rssi">RSSI</th><th class="c-seen">Age</th>
+</tr></thead><tbody id="rows"></tbody></table></main>
+<footer id="foot">connecting…</footer>
+<script>
+"use strict";
+const sid = location.pathname.split("/").pop();
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (v, d = "") => (v === null || v === undefined ? d : v);
+function altCell(a) {
+  if (a.ground) return '<span class="dim">GND</span>';
+  if (a.alt === null) return "";
+  const trend = a.vrate === null || Math.abs(a.vrate) < 256 ? "" : a.vrate > 0 ? ' <span class="up">↑</span>' : ' <span class="down">↓</span>';
+  return a.alt.toLocaleString("en-US") + trend;
+}
+function vsCell(a) {
+  if (a.vrate === null || a.ground) return "";
+  const cls = Math.abs(a.vrate) < 256 ? "dim" : a.vrate > 0 ? "up" : "down";
+  return `<span class="${cls}">${a.vrate > 0 ? "+" : ""}${a.vrate}</span>`;
+}
+function rowsThatFit(data) {
+  // keep rows to what fits so nothing scrolls on a wall
+  const main = document.querySelector("main");
+  const head = document.querySelector("thead").offsetHeight || 24;
+  const probe = $("rows").firstElementChild;
+  const rowH = probe ? probe.offsetHeight : 26;
+  return Math.max(1, Math.floor((main.clientHeight - head) / Math.max(rowH, 12)));
+}
+async function tick() {
+  let d;
+  try {
+    const r = await fetch("/api/adsb/" + encodeURIComponent(sid), { cache: "no-store" });
+    d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+  } catch (e) {
+    $("foot").innerHTML = `<span class="err">${esc(e.message)}</span>`;
+    return;
+  }
+  $("title").textContent = d.name || "ADS-B";
+  $("n").textContent = d.total;
+  $("np").textContent = d.with_pos;
+  $("rate").textContent = fmt(d.msg_rate, "–");
+  $("dist-h").textContent = "Dist " + d.units;
+  $("far").innerHTML = d.max_dist !== null ? `farthest <em>${d.max_dist} ${esc(d.units)}</em>` : "";
+  const html = d.aircraft.map((a) => {
+    const cls = [a.alert && "alert", a.seen > 30 && "stale"].filter(Boolean).join(" ");
+    const sq = a.squawk ? `<td class="${a.alert ? "sq7" : ""}">${esc(a.squawk)}</td>` : "<td></td>";
+    return `<tr class="${cls}">
+      <td class="l call">${esc(a.flight || "")}${a.alert ? " " + esc(a.alert) : ""}</td>
+      <td class="l c-hex dim">${esc(a.hex)}</td>${sq}
+      <td>${altCell(a)}</td><td class="c-vr">${vsCell(a)}</td>
+      <td>${fmt(a.gs)}</td>
+      <td class="c-trk arrow">${fmt(a.track_arrow)}</td><td class="c-trk">${a.track === null ? "" : String(a.track).padStart(3, "0") + "°"}</td>
+      <td>${a.dist === null ? '<span class="dim">no pos</span>' : a.dist}</td>
+      <td class="arrow">${fmt(a.brg_arrow)}</td><td class="l">${a.brg === null ? "" : String(a.brg).padStart(3, "0") + "° " + a.brg_card}</td>
+      <td class="c-rssi dim">${fmt(a.rssi)}</td><td class="c-seen dim">${a.seen < 1 ? "now" : Math.round(a.seen) + "s"}</td>
+    </tr>`;
+  });
+  $("rows").innerHTML = html.join("");
+  const fit = rowsThatFit(d);
+  const extra = d.aircraft.length - fit;
+  [...$("rows").children].forEach((tr, i) => (tr.hidden = i >= fit));
+  const st = d.station
+    ? `from ${d.station.from === "receiver" ? "receiver location" : esc(d.station.from)} (${d.station.lat}, ${d.station.lon})`
+    : '<span class="err">no location set: distances need a Maidenhead locator or lat, lon</span>';
+  $("foot").innerHTML = (d.error ? `<span class="err">${esc(d.error)}</span> · ` : "") + st +
+    (extra > 0 ? ` · +${extra} more` : "") + ` · ${esc(d.source || "")}`;
+}
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

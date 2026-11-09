@@ -1,0 +1,16 @@
+#!/bin/bash
+# windopane-power: reboot or shut down, as asked for from the web UI.
+# Runs as root through a sudo rule that allows exactly these two commands.
+set -u
+case "${1:-}" in
+  reboot|poweroff) action=$1 ;;
+  *) echo "usage: windopane-power reboot|poweroff" >&2; exit 2 ;;
+esac
+install -d -m 755 /var/log/windopane
+echo "$(date '+%F %T') $action requested from the web UI" >>/var/log/windopane/power.log
+# Wait a moment so the web UI gets its answer before the network goes down.
+if command -v systemd-run >/dev/null 2>&1 &&
+   systemd-run --quiet --no-block --on-active=2 --unit="windopane-$action-$$" systemctl "$action" 2>/dev/null; then
+  exit 0
+fi
+setsid -f sh -c "sleep 2; systemctl $action" </dev/null >/dev/null 2>&1

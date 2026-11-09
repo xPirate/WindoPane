@@ -1,0 +1,12 @@
+#!/bin/bash
+# Keep yt-dlp current (sites change often) and restart the wall if it changed.
+set -u
+VENV=/opt/windopane/venv
+old="$("$VENV/bin/yt-dlp" --version 2>/dev/null || echo none)"
+"$VENV/bin/pip" install -q --upgrade "yt-dlp[default]" "deno>=2" || exit 1
+new="$("$VENV/bin/yt-dlp" --version 2>/dev/null || echo none)"
+echo "yt-dlp: $old -> $new"
+if [ "$old" != "$new" ]; then
+  # The session loop restarts it within a few seconds.
+  pkill -f "^/opt/windopane/venv/bin/python3 -m windopane" || true
+fi

@@ -1,0 +1,9 @@
+#!/bin/bash
+# Started from the tty1 autologin. Brings up a bare X server (no desktop)
+# whose only client is the WindoPane wall. If it exits, the console logs out
+# and autologin starts it again.
+LOGS=/var/lib/windopane/logs
+mkdir -p "$LOGS"
+[ -f "$LOGS/session.log" ] && mv -f "$LOGS/session.log" "$LOGS/session.prev.log"
+exec startx /opt/windopane/bin/windopane-xinit -- :0 vt1 -keeptty -nocursor -s 0 -dpms \
+  >>"$LOGS/session.log" 2>&1

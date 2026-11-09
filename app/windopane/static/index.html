@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>WindoPane</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%2312161c'/%3E%3Crect x='3' y='3' width='4.5' height='4.5' fill='%23ffb020'/%3E%3Crect x='8.5' y='3' width='4.5' height='4.5' fill='%235b6573'/%3E%3Crect x='3' y='8.5' width='4.5' height='4.5' fill='%235b6573'/%3E%3Crect x='8.5' y='8.5' width='4.5' height='4.5' fill='%235b6573'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <span class="glyph" aria-hidden="true"><i class="on"></i><i></i><i></i><i></i></span>
+    <span class="word">windo<b>Pane</b></span>
+    <span class="chip" id="sys-chip">connecting&hellip;</span>
+  </div>
+  <nav class="views" aria-label="Pages">
+    <a href="/" data-view="wall">Wall</a>
+    <a href="/settings" data-view="settings">Settings</a>
+  </nav>
+  <div class="audio-ctl">
+    <button class="btn ghost" id="mute-all" title="Mute every tile (keyboard 0 / M)">Mute all</button>
+    <label class="vol" title="Volume of the audible tile">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path class="wave" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12"/></svg>
+      <input type="range" id="volume" min="0" max="100" step="1" aria-label="Volume">
+      <output id="volume-out">--</output>
+    </label>
+  </div>
+</header>
+
+<main id="view-wall">
+  <section class="alert-strip" id="alert-strip" hidden aria-live="polite">
+    <div class="alert-strip-head">
+      <h2>On the wall now</h2>
+      <button class="btn small" id="dismiss-all">Dismiss all</button>
+    </div>
+    <ul class="alert-list" id="alert-active"></ul>
+  </section>
+
+  <section class="panel screen-panel">
+    <div class="panel-head">
+      <h2>Screen</h2>
+      <span class="hint" id="screen-hint">Click a tile to listen. Pick what plays in each slot from its menu.</span>
+      <div class="head-actions">
+        <button class="btn ghost small" id="reload-all">Reload screen</button>
+      </div>
+    </div>
+    <div class="screen-tabs" id="screen-tabs" role="tablist" aria-label="Screens"></div>
+    <div class="tv-wrap"><div class="tv" id="tv"></div><p class="tv-note" id="tv-note" hidden></p></div>
+    <div class="layouts" id="layouts" role="radiogroup" aria-label="Layout"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Streams</h2>
+      <span class="hint">YouTube, Twitch, RTSP cameras, HLS, any web page (tar1090 maps, radar, dashboards), or a text ADS-B table from dump1090.</span>
+      <div class="head-actions"><button class="btn" id="add-stream">Add stream</button></div>
+    </div>
+    <form class="stream-form" id="stream-form" hidden autocomplete="off">
+      <input type="hidden" name="sid">
+      <div class="grid">
+        <label class="wide">URL<input name="url" required placeholder="https://www.twitch.tv/... · rtsp://camera/stream · http://pi.local/tar1090/"></label>
+        <label>Name<input name="name" maxlength="80" placeholder="Optional"></label>
+        <label>Type
+          <select name="kind">
+            <option value="auto">Auto-detect</option>
+            <option value="video">Video (VLC)</option>
+            <option value="web">Web page</option>
+            <option value="adsb">ADS-B table (dump1090)</option>
+          </select>
+        </label>
+        <label class="video-only">Behaviour
+          <select name="mode">
+            <option value="auto">Auto (from the link)</option>
+            <option value="single">Single video / stream</option>
+            <option value="playlist">Play the playlist</option>
+            <option value="live">Wait for the channel to go live</option>
+          </select>
+        </label>
+        <label class="video-only mode-playlist check inline"><input type="checkbox" name="shuffle"> Shuffle</label>
+        <label class="video-only mode-live">Check every (min)<input name="check_minutes" type="number" min="1" max="60" placeholder="2"></label>
+        <label class="video-only mode-live">When live, take over
+          <select name="takeover"><option value="">Nothing (stay where assigned)</option></select>
+        </label>
+        <label class="video-only mode-live takeover-prio">Priority
+          <select name="priority">
+            <option value="1">1 (highest)</option><option value="2">2</option><option value="3">3</option>
+            <option value="4">4</option><option value="5" selected>5</option><option value="6">6</option>
+            <option value="7">7</option><option value="8">8</option><option value="9">9 (lowest)</option>
+          </select>
+        </label>
+        <label class="video-only">Max quality
+          <select name="max_height">
+            <option value="">Auto</option>
+            <option value="2160">2160p</option><option value="1440">1440p</option>
+            <option value="1080">1080p</option><option value="720">720p</option>
+            <option value="480">480p</option><option value="360">360p</option>
+          </select>
+        </label>
+        <label class="adsb-only wide2">Your location
+          <input name="location" placeholder="EM15fl  or  35.47, -97.52" autocomplete="off">
+        </label>
+        <label class="adsb-only">Distance units
+          <select name="units"><option value="nm">Nautical miles</option><option value="km">Kilometres</option><option value="mi">Miles</option></select>
+        </label>
+        <label class="adsb-only">Max range<input name="max_range" type="number" min="1" max="1000" placeholder="No limit"></label>
+        <label class="web-only adsb-zoom">Page zoom<input name="zoom" type="number" min="0.25" max="4" step="0.05" placeholder="Auto"></label>
+        <label class="web-only">Reload every (min)<input name="refresh_minutes" type="number" min="0" max="1440" placeholder="Never"></label>
+        <label class="slot-pick">Put on screen
+          <select name="slot"><option value="">Not yet</option></select>
+        </label>
+      </div>
+      <div class="form-foot">
+        <span class="test-out" id="test-out"></span>
+        <button type="button" class="btn ghost" id="test-stream">Test</button>
+        <button type="button" class="btn ghost" id="cancel-stream">Cancel</button>
+        <button type="submit" class="btn primary" id="save-stream">Save</button>
+      </div>
+    </form>
+    <ul class="streams" id="streams"></ul>
+    <p class="empty-note" id="streams-empty" hidden>No streams yet. Add one to get started.</p>
+  </section>
+
+</main>
+
+<main id="view-settings" hidden>
+  <section class="panel" id="alerts-panel">
+    <div class="panel-head">
+      <h2>Alerts</h2>
+      <span class="hint">New headlines from RSS or Atom feeds pop up on the wall or scroll along a ticker. Only titles are read.</span>
+      <div class="head-actions"><button class="btn" id="add-feed">Add feed</button></div>
+    </div>
+    <form class="stream-form feed-form" id="feed-form" hidden autocomplete="off">
+      <input type="hidden" name="fid">
+      <div class="grid">
+        <label class="wide">Feed URL<input name="url" required placeholder="https://www.war.gov/news/rss_releases2.xml"></label>
+        <label>Name<input name="name" maxlength="60" placeholder="From the feed"></label>
+        <label>Show as
+          <select name="style">
+            <option value="popup">Pop-up</option>
+            <option value="ticker">Ticker</option>
+            <option value="both">Pop-up and ticker</option>
+          </select>
+        </label>
+        <label>On screen for
+          <select name="seconds">
+            <option value="10">10 seconds</option><option value="20">20 seconds</option>
+            <option value="30">30 seconds</option><option value="60">1 minute</option>
+            <option value="120">2 minutes</option><option value="300">5 minutes</option>
+            <option value="600">10 minutes</option><option value="1800">30 minutes</option>
+            <option value="3600">1 hour</option><option value="0">Until dismissed</option>
+          </select>
+        </label>
+        <label>Check every (min)<input name="every_minutes" type="number" min="1" max="1440" placeholder="5"></label>
+        <label>Screens<select name="screens"><option value="all">All screens</option></select></label>
+        <label class="wide2">Only titles containing<input name="match" maxlength="200" placeholder="Optional: words separated by commas"></label>
+        <label class="check"><input type="checkbox" name="enabled" checked> Watch this feed</label>
+      </div>
+      <ul class="feed-preview" id="feed-preview" hidden></ul>
+      <div class="form-foot">
+        <span class="test-out" id="feed-out"></span>
+        <button type="button" class="btn ghost" id="test-feed">Test</button>
+        <button type="button" class="btn ghost" id="cancel-feed">Cancel</button>
+        <button type="submit" class="btn primary" id="save-feed">Save</button>
+      </div>
+    </form>
+    <ul class="streams feeds" id="feeds"></ul>
+    <p class="empty-note" id="feeds-empty" hidden>No feeds yet. Add one, for example a news-release or travel-advisory RSS feed.</p>
+
+    <form class="alert-settings" id="alert-settings" autocomplete="off">
+      <label class="check"><input type="checkbox" name="enabled"> Show alerts on the wall</label>
+      <label>Pop-up position
+        <select name="popup_position">
+          <option value="top-right">Top right</option><option value="top-left">Top left</option>
+          <option value="bottom-right">Bottom right</option><option value="bottom-left">Bottom left</option>
+        </select>
+      </label>
+      <label>Pop-ups at once
+        <select name="max_popups"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select>
+      </label>
+      <label>Ticker position
+        <select name="ticker_position"><option value="bottom">Bottom</option><option value="top">Top</option></select>
+      </label>
+      <label>Ticker speed
+        <select name="ticker_speed"><option value="slow">Slow</option><option value="normal">Normal</option><option value="fast">Fast</option></select>
+      </label>
+    </form>
+
+    <div class="recent-head">
+      <h3>Recent alerts</h3>
+      <button class="btn small ghost" id="dismiss-all-2">Dismiss all</button>
+    </div>
+    <ul class="alert-list" id="alert-recent"></ul>
+    <p class="empty-note" id="recent-empty">Nothing yet. New headlines show up here as well as on the wall.</p>
+  </section>
+
+  <div class="two">
+    <section class="panel">
+      <div class="panel-head"><h2>Display &amp; playback</h2></div>
+      <form class="settings" id="settings" autocomplete="off">
+        <div class="screens-settings" id="screens-settings"></div>
+        <label>Quality cap
+          <select name="quality_cap">
+            <option value="auto">Auto for this Pi</option>
+            <option value="2160">2160p</option><option value="1440">1440p</option>
+            <option value="1080">1080p</option><option value="720">720p</option>
+            <option value="480">480p</option>
+          </select>
+        </label>
+        <label>Gap between tiles (px)<input name="gap" type="number" min="0" max="64"></label>
+        <label>Audio highlight (px)<input name="border" placeholder="auto"></label>
+        <label>Network buffer (ms)<input name="network_caching_ms" type="number" min="200" max="20000" step="100"></label>
+        <label>Restart stalled after (s)<input name="stall_timeout_s" type="number" min="10" max="600"></label>
+        <label>Screen arrangement
+          <select name="arrangement">
+            <option value="auto">Auto (row if it fits, else grid)</option>
+            <option value="row">Side by side</option>
+            <option value="grid">Grid (2 per row)</option>
+          </select>
+        </label>
+        <label>Video player
+          <select name="engine">
+            <option value="auto">Auto (VLC on Pi, mpv on PC)</option>
+            <option value="vlc">VLC</option>
+            <option value="mpv">mpv (GPU decoding via VA-API)</option>
+          </select>
+        </label>
+        <label class="check"><input type="checkbox" name="osd"> Show stream name when switching audio</label>
+        <label>Web UI password<input name="password" type="password" placeholder="unchanged" autocomplete="new-password"></label>
+        <div class="form-foot"><span class="test-out" id="settings-out"></span><button class="btn primary" type="submit">Save settings</button></div>
+      </form>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2>System</h2></div>
+      <div class="power" id="power">
+        <button class="btn power-btn" data-action="restart" type="button">
+          <b>Restart the wall</b><small>Reloads windoPane in a few seconds</small></button>
+        <button class="btn power-btn" data-action="reboot" type="button">
+          <b>Reboot</b><small>Back in about a minute</small></button>
+        <button class="btn power-btn danger" data-action="poweroff" type="button">
+          <b>Shut down</b><small id="poweroff-note">Turns the system off</small></button>
+      </div>
+      <p class="small-note" id="power-note">Press a button twice to confirm.</p>
+      <dl class="sys" id="sys"></dl>
+    </section>
+  </div>
+
+  <section class="panel" id="gpu-panel" hidden>
+    <div class="panel-head">
+      <h2>Graphics</h2>
+      <span class="hint">Video drivers for this PC's graphics card.</span>
+    </div>
+    <div class="gpu-grid">
+      <dl class="sys gpu-info" id="gpu-info"></dl>
+      <form class="gpu-form" id="gpu-form" autocomplete="off">
+        <div class="vendors" id="gpu-vendors" role="radiogroup" aria-label="Driver set"></div>
+        <label class="check confirm">
+          <input type="checkbox" name="confirm">
+          <span>I understand this installs and <b>removes</b> system packages: drivers for the other GPU brands are uninstalled, the wall may stutter while it runs, and a reboot is needed to finish.</span>
+        </label>
+        <div class="form-foot">
+          <span class="test-out" id="gpu-out"></span>
+          <button class="btn primary" type="submit" id="gpu-apply" disabled>Switch drivers</button>
+        </div>
+      </form>
+    </div>
+    <div class="gpu-job" id="gpu-job" hidden>
+      <div class="job-head">
+        <span class="job-status" id="gpu-job-status"></span>
+        <button class="btn" type="button" id="gpu-reboot" hidden>Reboot now</button>
+      </div>
+      <pre class="log" id="gpu-log"></pre>
+    </div>
+  </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Keyboard &amp; controller</h2><span class="hint">Works on the wall from any USB or Bluetooth keyboard or game controller.</span></div>
+      <table class="keys">
+        <thead><tr><th>Action</th><th>Keyboard</th><th>Controller</th></tr></thead>
+        <tbody>
+          <tr><td>Pick a screen (audio follows)</td><td><kbd>F1</kbd>&ndash;<kbd>F4</kbd>, <kbd>S</kbd> next</td><td>Right stick click: next</td></tr>
+          <tr><td>Listen to a tile on that screen</td><td><kbd>1</kbd>&ndash;<kbd>9</kbd>; tiles 10&ndash;16: <kbd>1</kbd> then a digit</td><td>A B X Y = tiles 1&ndash;4</td></tr>
+          <tr><td>Mute all</td><td><kbd>0</kbd> <kbd>M</kbd></td><td>Start</td></tr>
+          <tr><td>Next / previous tile (all screens)</td><td><kbd>&rarr;</kbd> <kbd>Tab</kbd> / <kbd>&larr;</kbd></td><td>RB / LB, d-pad</td></tr>
+          <tr><td>Volume</td><td><kbd>&uarr;</kbd> <kbd>&darr;</kbd> <kbd>+</kbd> <kbd>&minus;</kbd></td><td>d-pad up / down</td></tr>
+          <tr><td>Next / previous layout (focused screen)</td><td><kbd>L</kbd> / <kbd>K</kbd></td><td>Select</td></tr>
+          <tr><td>Zoom audible tile</td><td><kbd>Z</kbd> <kbd>Enter</kbd></td><td>Guide, left stick</td></tr>
+          <tr><td>Reload audible tile</td><td><kbd>R</kbd></td><td>&mdash;</td></tr>
+          <tr><td>Next / previous playlist video</td><td><kbd>N</kbd> / <kbd>B</kbd>, media keys</td><td>&mdash;</td></tr>
+          <tr><td>Dismiss alerts</td><td><kbd>D</kbd> <kbd>Esc</kbd></td><td>&mdash;</td></tr>
+        </tbody>
+      </table>
+      <p class="small-note" id="inputs-note"></p>
+    </section>
+
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

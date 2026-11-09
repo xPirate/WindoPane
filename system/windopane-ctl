@@ -1,0 +1,48 @@
+#!/bin/bash
+# windopane-ctl: manage the WindoPane wall from SSH.
+set -u
+STATE=/var/lib/windopane
+LOGS=$STATE/logs
+PATTERN="^/opt/windopane/venv/bin/python3 -m windopane"
+
+need_root() { [ "$(id -u)" -eq 0 ] || { echo "run with sudo: sudo windopane-ctl $1" >&2; exit 1; }; }
+
+port() {
+  PYTHONPATH=/opt/windopane/app /opt/windopane/venv/bin/python3 -c \
+    "from windopane import config; print(config.load('$STATE/config.json')['web']['port'])" 2>/dev/null || echo 8090
+}
+
+case "${1:-status}" in
+  status)
+    if pgrep -f "$PATTERN" >/dev/null; then echo "running"; else echo "not running"; fi
+    [ -e "$STATE/disabled" ] && echo "autostart: disabled (windopane-ctl start to re-enable)"
+    echo "web UI: http://$(hostname -I | awk '{print $1}'):$(port)"
+    echo "yt-dlp: $(/opt/windopane/venv/bin/yt-dlp --version 2>/dev/null || echo missing)"
+    ;;
+  restart)
+    pkill -f "$PATTERN" && echo "restarting (back in a few seconds)" || echo "not running"
+    ;;
+  stop)
+    need_root stop
+    touch "$STATE/disabled"
+    systemctl restart getty@tty1
+    echo "stopped; HDMI shows the console. 'sudo windopane-ctl start' to bring it back."
+    ;;
+  start)
+    need_root start
+    rm -f "$STATE/disabled"
+    systemctl restart getty@tty1
+    echo "starting"
+    ;;
+  logs)
+    tail -n 200 -F "$LOGS/session.log"
+    ;;
+  update-ytdlp)
+    need_root update-ytdlp
+    /opt/windopane/bin/windopane-update-ytdlp
+    ;;
+  *)
+    echo "usage: windopane-ctl status|restart|stop|start|logs|update-ytdlp" >&2
+    exit 1
+    ;;
+esac
